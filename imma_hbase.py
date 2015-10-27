@@ -30,10 +30,8 @@ def get_key(data):
         latitude, longitude - as decimal degrees without the decimal point
                     and left filled with zeros
                     to make 5 symbols: 04269 02332 for Sofia
-        random - 4 random symbols to distinguish between keys with
-                    equal first part
-        so, for 1971-01-01 16:00 in Sofia wi may have:
-                    1971011716000426902332xxxx
+        so, for 1971-01-01 16:00 in Sofia we will have:
+                    1971011716000426902332
     '''
     key_format = '{year:0>4d}{month:0>2d}{day:0>2d}{hour:0>4d}' + \
                  '{latitude}{longitude}{rand}'
@@ -63,6 +61,9 @@ if __name__ == '__main__':
                     'and save the results in hbase database')
     parser.add_argument('-in', '--infile',
                         help='File to read from (stdin if not specified)')
+    parser.add_argument('-out', '--outfile',
+                        help='File to write row keys to '
+                             '(stdout if not specified)')
     parser.add_argument('-t', '--datatable', default='meteo:icoads',
                         help='Data table to write to'
                              '(defaults to "meteo:icoad")')
@@ -83,6 +84,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     input_file = args.infile and open(args.infile) or sys.stdin
+    output_file = args.outfile and open(args.outfile) or sys.stdout
     connection = happybase.Connection(host=args.host, port=args.port)
 
     line_number = 0
@@ -104,6 +106,7 @@ if __name__ == '__main__':
                         format(line=', '.join([str(d[1]) for d in data])))
                 hbase_write(connection, args.datatable, args.column_family,
                             key, data)
+                output_file.write(key + '\n')
         except Exception, e:
             log('ERROR',
                 'Error parsing line "{}".\n'

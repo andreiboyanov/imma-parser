@@ -7,23 +7,8 @@ from imma_formats import TABLES
 
 
 def log(level, message):
-    sys.stderr.write('[{level}] {message}'.format(level=level,
+    sys.stderr.write('[{level}] {message}\n'.format(level=level,
                                                   message=message))
-
-
-def get_key(data):
-    key_format = '{year:0>4d}{month:0>2d}{day:0>2d}{hour:0>4d}' + \
-            '{latitude}{longitude}'
-    data_dict = dict(data)
-    latitude = '{:0>6.2f}'.format(data_dict['LAT']).replace('.', '')
-    longitude = '{:0>6.2f}'.format(data_dict['LON']).replace('.', '')
-    key = key_format.format(year=data_dict['YR'],
-                            month=data_dict['MO'],
-                            day=data_dict['DY'],
-                            hour=data_dict['HR'],
-                            latitude=latitude,
-                            longitude=longitude)
-    return key
 
 
 def parse_line(line):
@@ -73,8 +58,6 @@ if __name__ == '__main__':
                         help='File to read from (stdin if not specified)')
     parser.add_argument('-out', '--outfile',
                         help='File to write to (stdout if not specified)')
-    parser.add_argument('-u', '--unparsed', action='store_true',
-                        help='Writes only the key and the unparsed line')
     parser.add_argument('-from', '--from-line', type=int,
                         help='Output starting from <from_line>')
     parser.add_argument('-to', '--to-line', type=int,
@@ -84,17 +67,19 @@ if __name__ == '__main__':
     input_file = args.infile and open(args.infile) or sys.stdin
     output_file = args.outfile and open(args.outfile, 'a+') or sys.stdout
 
-    line_number = 0 
+    line_number = 0
     for line in input_file:
-        line_number += 1
-        if args.from_line and args.from_line > line_number:
-            continue
-        if args.to_line and args.to_line < line_number:
-            break
-        data = parse_line(line)
-        key = get_key(data)
-        if args.unparsed:
-            output_file.write(', \n'.join((key, line)))
-        else:
-            output_file.write(','.join([key, ] +
-                              [str(element[1]) for element in data]) + '\n')
+        try:
+            line_number += 1
+            if args.from_line and args.from_line > line_number:
+                continue
+            if args.to_line and args.to_line < line_number:
+                break
+            data = parse_line(line)
+            output_file.write(','.join(
+                              [str(element[1]) for element in data])
+                              + '\n')
+        except Exception, e:
+            log('ERROR',
+                'Error parsing line "{}".\n'
+                'The error message was "{}"'.format(line, e.message))
