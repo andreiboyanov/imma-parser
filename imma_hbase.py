@@ -4,7 +4,6 @@
 import argparse
 import sys
 from imma_parser import parse_line, log
-from hbase_mappings import get_data
 import happybase
 import string
 import random
@@ -20,37 +19,44 @@ def id_generator(size=4, chars=ID_CHARS):
 def get_key(data):
     '''
     Returns a value to use as HBase row key. As I don't care about slow
-    writes a key starting with a timestamp is good for me.
-    Geo position should also be included for uniqueness.
-    TODO: how to optimize searches by geo position?
+    writes a timestamp key is good for me.
+    Geo positions are used as columns.
 
-    So, the key is: <timestamp><latitude><longitude><random>
-        timestamp - string in the form YYmmddHHMM:
-                     197101171600 for tea time on 1st of January 1971
-        latitude, longitude - as decimal degrees without the decimal point
-                    and left filled with zeros
-                    to make 5 symbols: 04269 02332 for Sofia
-        so, for 1971-01-01 16:00 in Sofia we will have:
-                    1971011716000426902332
+    So, the key is: YYYYmmddHHMM
     '''
-    key_format = '{year:0>4d}{month:0>2d}{day:0>2d}{hour:0>4d}' + \
-                 '{latitude}{longitude}{rand}'
-    data_dict = dict(data)
-    latitude = '{:0>6.2f}'.format(data_dict['LAT']).replace('.', '')
-    longitude = '{:0>6.2f}'.format(data_dict['LON']).replace('.', '')
-    key = key_format.format(year=data_dict['YR'],
-                            month=data_dict['MO'],
-                            day=data_dict['DY'],
-                            hour=data_dict['HR'],
-                            latitude=latitude,
-                            longitude=longitude,
-                            rand=id_generator())
+    key_format = '{year:0>4d}{month:0>2d}{day:0>2d}{hour:0>4d}'
+    key = key_format.format(year=data['YR'],
+                            month=data['MO'],
+                            day=data['DY'],
+                            hour=data['HR'])
     return key
 
 
-def hbase_write(connection, table_name, family, key, data):
+def get_column(data):
+    '''
+    Return the column name to write to (without the family qualifier).
+    I'll use the rounded to integers Longitude and Latitude for column names.
+    I hope that this will give me very performant search for meteo data
+    '''
+    latitude = int(round(data['LAT']))
+    longitude = int(round(data['LON']))
+    return '{:0=-3d}{:0=-3d}'.format(latitude, longitude)
+
+
+def get_value(data):
+    '''
+        Value to write to the database cell.
+        It's just the string represantation of the imma data as dictionary
+    '''
+    return repr(data)
+
+
+def hbase_write(connection, table_name, family, data):
     table = connection.table(table_name)
-    table.put(key, get_data(data, family))
+    key = get_key(data)
+    value = get_value(data)
+    column = family + ':' + get_column(data)
+    table.put(key, {column: value}, wal=False)
 
 
 if __name__ == '__main__':
@@ -67,8 +73,8 @@ if __name__ == '__main__':
     parser.add_argument('-t', '--datatable', default='meteo:icoads',
                         help='Data table to write to'
                              '(defaults to "meteo:icoad")')
-    parser.add_argument('-f', '--column-family', default='d',
-                        help='Column family to write to (defaults to "d")')
+    parser.add_argument('-f', '--column-family', default='c',
+                        help='Column family to write to (defaults to "c")')
     parser.add_argument('-host', '--host', help='HBase host',
                         default='localhost')
     parser.add_argument('-p', '--port', help='HBase port', type=int,
@@ -95,18 +101,20 @@ if __name__ == '__main__':
                 continue
             if args.to_line and args.to_line < line_number:
                 break
-            data = parse_line(line)
-            key = get_key(data)
+            data = dict(parse_line(line))
             if args.unparsed:
                 log('WARNING', '--unparsed not supported yet')
                 exit(-1)
             else:
                 if args.debug:
-                    log('INFO', 'Writing {line} to HBase'.
-                        format(line=', '.join([str(d[1]) for d in data])))
+                    value = get_value(data)
+                    column = args.column_family + ':' + get_column(data)
+                    log('INFO', 'Writing {key}:{column} ==> {data} to HBase'.
+                        format(key=get_key(data), column=column, data=value))
+                else:
+                    output_file.write(get_key(data) + '\n')
                 hbase_write(connection, args.datatable, args.column_family,
-                            key, data)
-                output_file.write(key + '\n')
+                            data)
         except Exception, e:
             log('ERROR',
                 'Error parsing line "{}".\n'
